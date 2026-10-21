@@ -1,0 +1,31 @@
+[package]
+name = "cosplay"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "CosPlay Rust: terminal and native GPU glyph game engine"
+publish = false
+
+[features]
+default = []
+meadow = ["dep:wgpu", "dep:winit", "dep:glam", "dep:fontdue", "dep:bytemuck", "dep:pollster", "dep:png"]
+
+[dependencies]
+crossterm = "0.29"
+unicode-width = "0.2"
+wgpu = { version = "27", optional = true }
+winit = { version = "0.30", optional = true }
+glam = { version = "0.30", optional = true }
+fontdue = { version = "0.9", optional = true }
+bytemuck = { version = "1", features = ["derive"], optional = true }
+pollster = { version = "0.4", optional = true }
+png = { version = "0.17", optional = true }
+
+[[bin]]
+name = "pong"
+path = "src/bin/pong.rs"
+
+[[bin]]
+name = "meadow"
+path = "src/bin/meadow.rs"
+required-features = ["meadow"]
