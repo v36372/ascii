@@ -89,7 +89,7 @@ bit-for-bit. Colors are linear and the output is sRGB.
   a graphics adapter. Errors are surfaced rather than replacing the GPU renderer.
 - The app clears held keys on focus loss, ignores one-shot actions from synthetic
   key events, handles zero-size windows/surface loss and avoids overdue timer spins.
-- `rust/docs/meadow.png` is a native initial-frame capture, not the reference image.
+- `docs/meadow.png` is a native initial-frame capture, not the reference image.
 
 This milestone is a traversable visual demo, not a complete RPG. Gameplay systems,
 asset authoring/import, additional characters, post-processing and common scene

@@ -32,9 +32,55 @@ pub enum Key {
     Left,
     Right,
     Char(char),
+    Ctrl(char),
+    Alt(char),
     Enter,
     Escape,
     Space,
+    Tab,
+    Backspace,
+    Delete,
+    Insert,
+    Home,
+    End,
+    PageUp,
+    PageDown,
+    /// Function key in `1..=12`.
+    F(u8),
+}
+
+impl Key {
+    pub fn printable(self) -> Option<char> {
+        match self {
+            Self::Char(ch) | Self::Ctrl(ch) | Self::Alt(ch) => Some(ch),
+            Self::Space => Some(' '),
+            _ => None,
+        }
+    }
+
+    pub fn label(self) -> String {
+        match self {
+            Self::Char(ch) => ch.to_string(),
+            Self::Ctrl(ch) => format!("Ctrl+{ch}"),
+            Self::Alt(ch) => format!("Alt+{ch}"),
+            Self::F(n) => format!("F{n}"),
+            Self::Up => "Up".into(),
+            Self::Down => "Down".into(),
+            Self::Left => "Left".into(),
+            Self::Right => "Right".into(),
+            Self::Enter => "Enter".into(),
+            Self::Escape => "Escape".into(),
+            Self::Space => "Space".into(),
+            Self::Tab => "Tab".into(),
+            Self::Backspace => "Backspace".into(),
+            Self::Delete => "Delete".into(),
+            Self::Insert => "Insert".into(),
+            Self::Home => "Home".into(),
+            Self::End => "End".into(),
+            Self::PageUp => "PageUp".into(),
+            Self::PageDown => "PageDown".into(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -309,10 +355,26 @@ fn map_event(event: Event) -> Option<InputEvent> {
                 KeyCode::Down => Key::Down,
                 KeyCode::Left => Key::Left,
                 KeyCode::Right => Key::Right,
+                KeyCode::Char(' ') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    Key::Ctrl(' ')
+                }
+                KeyCode::Char(ch) if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    Key::Ctrl(ch.to_ascii_lowercase())
+                }
+                KeyCode::Char(ch) if key.modifiers.contains(KeyModifiers::ALT) => Key::Alt(ch),
                 KeyCode::Char(' ') => Key::Space,
                 KeyCode::Char(ch) => Key::Char(ch),
                 KeyCode::Enter => Key::Enter,
                 KeyCode::Esc => Key::Escape,
+                KeyCode::Tab | KeyCode::BackTab => Key::Tab,
+                KeyCode::Backspace => Key::Backspace,
+                KeyCode::Delete => Key::Delete,
+                KeyCode::Insert => Key::Insert,
+                KeyCode::Home => Key::Home,
+                KeyCode::End => Key::End,
+                KeyCode::PageUp => Key::PageUp,
+                KeyCode::PageDown => Key::PageDown,
+                KeyCode::F(n @ 1..=12) => Key::F(n),
                 _ => return None,
             };
             Some(InputEvent::Key(key))
@@ -683,7 +745,39 @@ mod tests {
                 KeyModifiers::NONE,
                 KeyEventKind::Press
             )),
-            None
+            Some(InputEvent::Key(Key::F(1)))
+        );
+        for (code, expected) in [
+            (KeyCode::Tab, Key::Tab),
+            (KeyCode::Backspace, Key::Backspace),
+            (KeyCode::Delete, Key::Delete),
+            (KeyCode::Insert, Key::Insert),
+            (KeyCode::Home, Key::Home),
+            (KeyCode::End, Key::End),
+            (KeyCode::PageUp, Key::PageUp),
+            (KeyCode::PageDown, Key::PageDown),
+            (KeyCode::F(12), Key::F(12)),
+        ] {
+            assert_eq!(
+                map_event(key_event(code, KeyModifiers::NONE, KeyEventKind::Press)),
+                Some(InputEvent::Key(expected))
+            );
+        }
+        assert_eq!(
+            map_event(key_event(
+                KeyCode::Char('a'),
+                KeyModifiers::CONTROL,
+                KeyEventKind::Press
+            )),
+            Some(InputEvent::Key(Key::Ctrl('a')))
+        );
+        assert_eq!(
+            map_event(key_event(
+                KeyCode::Char('x'),
+                KeyModifiers::ALT,
+                KeyEventKind::Press
+            )),
+            Some(InputEvent::Key(Key::Alt('x')))
         );
     }
 

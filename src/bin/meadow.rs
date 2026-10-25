@@ -532,6 +532,12 @@ impl ApplicationHandler for App {
         self.input.clear();
         self.state = None;
     }
+    fn exiting(&mut self, _: &ActiveEventLoop) {
+        // run_app consumes and drops the event loop before the App itself.
+        // Destroy the window, surface, and GPU backends while Wayland/X11
+        // connections are still alive.
+        self.state = None;
+    }
 }
 
 fn redraw_flow(now: Instant, deadline: Instant) -> ControlFlow {

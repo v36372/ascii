@@ -5,7 +5,9 @@ rendered as glyphs**, following the supplied `ascii-demo.zip` reference. This is
 not a terminal approximation or a fullscreen ASCII post-processing filter.
 
 The original Scala engine remains unchanged. This Rust implementation is not
-source-compatible with Scala and does not yet implement its full feature set.
+source-compatible with Scala. It targets functional parity: see
+[`PARITY.md`](PARITY.md) for the measured **82%** engine-feature assessment and
+the remaining content/tooling gaps.
 
 ![Native Rust meadow capture](docs/meadow.png)
 
@@ -16,7 +18,7 @@ source-compatible with Scala and does not yet implement its full feature set.
 Install current stable Rust, then from the repository root:
 
 ```sh
-cargo run --manifest-path rust/Cargo.toml --release --features meadow --bin meadow
+cargo run --release --features meadow --bin meadow
 ```
 
 This opens a native GPU window (Metal / Vulkan / DirectX, depending on platform).
@@ -53,7 +55,7 @@ and persistence are not implemented.
 ### Reproducible GPU captures
 
 ```sh
-cargo run --manifest-path rust/Cargo.toml --release --features meadow --bin meadow -- \
+cargo run --release --features meadow --bin meadow -- \
   --headless --frames 120 --auto --size 1280x800 --output /tmp/meadow.png
 ```
 
@@ -67,33 +69,46 @@ Other options: `--seed 2024`, `--density 0.25..2`, `--zoom 0.5..3`. Use `--help`
 all options. A positive `--frames N` without `--headless` closes the window after
 N presented frames, useful for native-window smoke testing.
 
-## Architecture
+## Native engine modules
 
-The optional `meadow` feature adds the spatial glyph renderer and graphical demo;
-the default build remains small and terminal-only.
+The default build is terminal-only; `meadow` adds the spatial GPU renderer and
+`audio` adds native playback.
 
-- `src/meadow/mod.rs`: renderer-neutral glyph instances, frame/pose/input data.
-- `src/meadow/world.rs`: deterministic procedural world and simulation; no window
-  or GPU calls. Static foliage data is cached, then culled and animated per frame.
-- `src/meadow/renderer.rs` and helpers: glyph atlas, GPU resources, depth-tested
-  instancing, offscreen 3D character pass, and PNG readback.
-- `src/bin/meadow.rs`: native winit window, input, CLI, timing, resize and surface
-  lifecycle, HUD and headless capture.
+- `graphics`: colors, clip stack, Z canvas, shapes, image drawing and capture.
+- `image`: transforms plus TXT, REXPaint CSV and gzipped XP I/O.
+- `font`: system text, FLF parsing and all 277 bundled FIGlet fonts.
+- `text`: nested markup, styled strings, wrapped ASCII tables.
+- `animation`: time-based/animated filmstrips and ASCII video.
+- `particles`: generic emitters plus deterministic confetti.
+- `shader`: fades, slides, shimmer, sparkle, border, flashlight, streaks and beat effects.
+- `sprites` / `ui`: image, animation, video and particle sprites; panels, lists,
+  text input and composed declarative layout.
+- `engine` / `runtime`: deterministic scene lifecycle, cameras, delayed caches,
+  timers, typed messages, logging and render statistics.
+- `audio`: WAV/AIFF/AU decoding, playback controls, beat envelopes and a registry.
+- `layout`, `random`, `curve`: UI relations, reproducible randomness, easing and gradients.
+- `meadow`: renderer-neutral glyph frames, deterministic world simulation and the
+  GPU instancing/3D-character/PNG pipeline.
+
+Run the integrated terminal showcase with:
+
+```sh
+cargo run --example terminal_showcase
+```
 
 The spatial renderer deliberately does **not** route through the terminal
 `Screen`/`Canvas`: a single fixed character cell cannot represent overlapping,
-rotated, subpixel glyph sprites. Both paths are part of the `cosplay` library,
-with separate frame representations. Grass animation currently runs on the CPU;
-the GPU draws instances and renders/converts the 3D knight. This is not a claim of
-an exact Three.js shader port or pixel-identical reproduction of the reference.
+rotated, subpixel glyph sprites. Both paths share assets and runtime concepts but
+have separate frame representations. This is not a claim of an exact Three.js
+shader port or pixel-identical reproduction of the reference.
 
-## Terminal foundation
+## Terminal game foundation
 
 Pong remains as a small regression/example for the original terminal milestone:
 
 ```sh
-cargo run --manifest-path rust/Cargo.toml --release --bin pong
-cargo run --manifest-path rust/Cargo.toml --bin pong -- --headless --frames 120 --size 60x20
+cargo run --release --bin pong
+cargo run --bin pong -- --headless --frames 120 --size 60x20
 ```
 
 Interactive Pong requires a true-color ANSI terminal of at least 40x16. W/S or
@@ -101,26 +116,27 @@ arrows move, Space/P pauses, R restarts, Q/Esc/Ctrl-C quits. Terminal modes are
 restored on normal exit, errors and panics; SIGKILL/direct abort cannot run cleanup.
 
 The terminal API includes RGB pixels, transparency/background inheritance,
-Z-order, clipping, bounded lines/rectangles/text, framebuffer snapshots, diff
-output, and an owned single-threaded scene engine. Objects have lifecycle,
-update/monitor/render/shader callbacks and deferred structural commands. Each
-drawing callback gets independent clipping. Update queries use a phase snapshot;
-render/shader ordering uses post-monitor `(z, id)` metadata. This intentionally
-replaces Scala's unrestricted mutable object references.
+Z-order, clip stacks, bounded primitives, image drawing/capture, framebuffer
+snapshots, diff output and an owned single-threaded scene engine. Objects have
+lifecycle, update/monitor/render/shader callbacks and deferred structural
+commands. Each drawing callback gets independent clipping. Update queries use a
+phase snapshot; render/shader ordering uses post-monitor `(z, id)` metadata. This
+intentionally replaces Scala's unrestricted mutable object references.
 
 ## Validation
 
 ```sh
-cargo fmt --manifest-path rust/Cargo.toml --check
-cargo test --manifest-path rust/Cargo.toml --all-features --all-targets --locked
-cargo test --manifest-path rust/Cargo.toml --all-features --doc --locked
-cargo clippy --manifest-path rust/Cargo.toml --all-features --all-targets --locked -- -D warnings
+cargo fmt --check
+cargo test --all-features --all-targets --locked
+cargo test --all-features --doc --locked
+cargo clippy --all-features --all-targets --locked -- -D warnings
+cargo run --example terminal_showcase
 # Requires a usable graphics adapter; validates real rendered PNGs and live 3D poses.
-cargo test --manifest-path rust/Cargo.toml --features meadow --lib meadow::renderer --locked -- --ignored --nocapture
-cargo test --manifest-path rust/Cargo.toml --features meadow --test meadow_cli --locked -- --ignored --nocapture
+cargo test --features meadow --lib meadow::renderer --locked -- --ignored --nocapture
+cargo test --features meadow --test meadow_cli --locked -- --ignored --nocapture
 # Unix/macOS: startup/input/resize/normal/error/panic terminal lifecycle.
-cargo build --manifest-path rust/Cargo.toml --bin pong --example terminal_lifecycle --locked
-python3 rust/tests/pty_smoke.py rust/target/debug/pong rust/target/debug/examples/terminal_lifecycle
+cargo build --bin pong --example terminal_lifecycle --locked
+python3 tests/pty_smoke.py target/debug/pong target/debug/examples/terminal_lifecycle
 ```
 
 Normal unit/CLI tests do not require a GPU or display. GPU execution is opt-in;
@@ -130,12 +146,14 @@ still need validation on real target machines.
 
 ## Scope and licenses
 
-Further Scala parity (audio, FIGlet, REXPaint, particle/shader prefabs,
-message/cache/timer APIs, layout language, and GUI debugger) remains deferred.
-The meadow is the current visual/gameplay direction; Pong is only a foundation test.
+[`PARITY.md`](PARITY.md) tracks the remaining gaps: upstream prefab art/video
+libraries, the built-in terminal emulator/GUI debugger, the full layout grammar,
+richer focus/scrollbar behavior, audio balance/streaming, and macOS/Windows
+verification. The meadow remains the native spatial direction; Pong is a
+foundation test.
 
 The supplied reference credits Ansenjeo's ASCII game clips for its visual style.
-The original project uses Apache-2.0 (`../LICENSE`). The embedded Source Code Pro
+This project is licensed under Apache-2.0 (`LICENSE`). The embedded Source Code Pro
 fonts already present in the repository use the SIL Open Font License, included
 in `assets/SOURCE-CODE-PRO-LICENSE.txt` and available through `meadow --licenses`.
 

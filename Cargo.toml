@@ -9,10 +9,13 @@ publish = false
 [features]
 default = []
 meadow = ["dep:wgpu", "dep:winit", "dep:glam", "dep:fontdue", "dep:bytemuck", "dep:pollster", "dep:png"]
+audio = ["dep:rodio"]
 
 [dependencies]
 crossterm = "0.29"
 unicode-width = "0.2"
+flate2 = "1"
+rodio = { version = "0.21", optional = true, default-features = false, features = ["playback"] }
 wgpu = { version = "27", optional = true }
 winit = { version = "0.30", optional = true }
 glam = { version = "0.30", optional = true }

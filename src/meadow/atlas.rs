@@ -7,10 +7,8 @@ pub(super) const CELL_WIDTH: u32 = 40;
 pub(super) const CELL_HEIGHT: u32 = 64;
 pub(super) const WIDTH: u32 = CELL_WIDTH * 16;
 pub(super) const HEIGHT: u32 = CELL_HEIGHT * 8;
-const REGULAR: &[u8] =
-    include_bytes!("../../../modules/cosplay/src/main/resources/fonts/SourceCodePro-Regular.ttf");
-const BOLD: &[u8] =
-    include_bytes!("../../../modules/cosplay/src/main/resources/fonts/SourceCodePro-Bold.ttf");
+const REGULAR: &[u8] = include_bytes!("../../assets/fonts/SourceCodePro-Regular.ttf");
+const BOLD: &[u8] = include_bytes!("../../assets/fonts/SourceCodePro-Bold.ttf");
 
 pub(super) struct Atlas {
     pub pixels: Vec<u8>,

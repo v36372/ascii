@@ -28,10 +28,23 @@
 //! ```
 #![forbid(unsafe_code)]
 
+pub mod animation;
+pub mod audio;
+pub mod curve;
 pub mod engine;
+pub mod font;
 pub mod graphics;
+pub mod image;
+pub mod layout;
+pub mod particles;
 pub mod pong;
+pub mod random;
+pub mod runtime;
+pub mod shader;
+pub mod sprites;
 pub mod terminal;
+pub mod text;
+pub mod ui;
 
 #[cfg(feature = "meadow")]
 pub mod meadow;

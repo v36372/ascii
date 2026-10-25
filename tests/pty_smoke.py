@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Unix-only end-to-end terminal checks; Python stdlib, no interactive user needed.
 
-Run after cargo build: python3 rust/tests/pty_smoke.py rust/target/debug/pong
+Run after cargo build: python3 tests/pty_smoke.py target/debug/pong
 Optionally build --example terminal_lifecycle and pass its executable as the
 second argument to also check normal, early-error, and panic cleanup.
 """
@@ -219,7 +219,7 @@ def check_lifecycle(executable, mode):
 
 
 if __name__ == "__main__":
-    executable = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else "rust/target/debug/pong").resolve()
+    executable = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else "target/debug/pong").resolve()
     check(executable, b"q", exercise_resize=True)
     check(executable, b"\x03")  # Ctrl-C is a key in raw mode, not SIGINT.
     check(executable, b"\x1b")

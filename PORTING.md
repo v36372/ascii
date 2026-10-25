@@ -7,7 +7,7 @@ layout language, and desktop emulator/debugger are deferred.
 
 ## Implementation contract
 
-Crate: `cosplay`, edition 2021, under `rust/`. Modules: `graphics`, `terminal`,
+Crate: `cosplay`, edition 2021, at the repository root. Modules: `graphics`, `terminal`,
 `engine`, `pong`. No unsafe code. Only `crossterm = "0.29"` and
 `unicode-width = "0.2"` initially. Public APIs below are coordination boundaries.
 
