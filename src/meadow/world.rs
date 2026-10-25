@@ -4,6 +4,9 @@
 //! height-field sampling. All occlusion uses root/ground y, never glyph-tip y.
 
 use super::{depth, Controls, GlyphInstance, HeroPose, MeadowFrame};
+use crate::spatial::prefabs::{
+    organic_cells, BladeStyle, GrassBlade, OrganicCell, Random, LETTERS,
+};
 use glam::{Vec2, Vec3};
 use std::f32::consts::{PI, TAU};
 
@@ -15,7 +18,6 @@ const GRASS_MARGIN: f32 = 85.0;
 const WORLD_LIMIT: f32 = 2800.0;
 const WALK_SPEED: f32 = 115.0;
 const RUN_SPEED: f32 = 230.0;
-const LETTERS: &[u8] = b".,ircvzxeoasunwqpdbhkgmQ8B";
 const PALETTES: [([f32; 3], [f32; 3]); 4] = [
     ([0.02, 0.08, 0.06], [0.34, 0.62, 0.27]),
     ([0.16, 0.025, 0.035], [0.82, 0.22, 0.17]),
@@ -205,32 +207,27 @@ impl World {
             * (gust * 0.6 + 0.82)
             * shade
             * light_pool(root, self.player);
-        let mut cursor = root;
-        for segment in 0..blade.segments {
-            let fraction = (f32::from(segment) + 1.0) / f32::from(blade.segments);
-            let middle = (f32::from(segment) + 0.5) / f32::from(blade.segments);
-            let angle = blade.lean + blade.curl * middle.powf(1.6) + bend * fraction.powf(1.8);
-            let vector = Vec2::new(angle.sin(), angle.cos()) * blade.length;
-            let position = cursor + vector * 0.5;
-            cursor += vector;
-            let (glyph, inherent) = match blade.style {
-                0..=6 => (b'|', 0.0),
-                7 => (b'/', 0.44),
-                8 => (b'\\', -0.44),
-                _ if segment + 1 == blade.segments => {
-                    (if blade.curl > 0.0 { b')' } else { b'(' }, 0.0)
-                }
-                _ => (b'|', 0.0),
-            };
-            let height = blade.length * 1.18;
-            if view.expanded(height).contains(position) {
+        let shape = GrassBlade {
+            segments: blade.segments,
+            segment_length: blade.length,
+            lean: blade.lean,
+            curl: blade.curl,
+            style: match blade.style {
+                0..=6 => BladeStyle::Straight,
+                7 => BladeStyle::Slash,
+                8 => BladeStyle::Backslash,
+                _ => BladeStyle::CurledTip,
+            },
+        };
+        for segment in shape.geometry(root, bend) {
+            if view.expanded(segment.size.y).contains(segment.position) {
                 out.push(glyph_instance(
-                    position,
-                    Vec2::new(height * 0.625 * 1.25, height),
-                    color * (fraction * 0.5 + 0.5),
-                    inherent - angle,
+                    segment.position,
+                    segment.size,
+                    color * (segment.fraction * 0.5 + 0.5),
+                    segment.rotation,
                     depth(root.y),
-                    glyph,
+                    segment.glyph,
                 ));
             }
         }
@@ -598,127 +595,20 @@ fn layout_trees(seed: u32) -> Vec<Spot> {
     spots
 }
 
-struct TreeCell {
-    local: Vec2,
-    brightness: f32,
-    seed: f32,
-    canopy: bool,
-}
 struct Tree {
     spot: Spot,
-    cells: Vec<TreeCell>,
+    cells: Vec<OrganicCell>,
     bounds: Bounds,
-}
-struct Blob {
-    center: Vec2,
-    radius: f32,
 }
 impl Tree {
     fn new(spot: Spot, rng: &mut Random) -> Self {
         let rock = spot.kind == 3;
-        let radius = spot.radius;
-        let cy = if rock {
-            radius * 0.75
-        } else {
-            spot.height - radius * 0.95
-        };
-        let mut blobs = vec![Blob {
-            center: Vec2::new(0.0, cy),
-            radius: radius * if rock { 0.85 } else { 0.75 },
-        }];
-        let count = if rock {
-            3
-        } else {
-            7 + (rng.next() * 4.0) as usize
-        };
-        for _ in 0..count {
-            let angle = rng.next() * TAU;
-            let distance = radius * (0.35 + rng.next() * 0.45);
-            blobs.push(Blob {
-                center: Vec2::new(
-                    angle.cos() * distance * 1.15,
-                    cy + angle.sin() * distance * if rock { 0.4 } else { 0.8 },
-                ),
-                radius: radius * (0.35 + rng.next() * 0.3),
-            });
-        }
-        let surface = |point: Vec2| {
-            let height = blobs
-                .iter()
-                .map(|blob| {
-                    let squared = point.distance_squared(blob.center);
-                    if squared < blob.radius * blob.radius {
-                        (blob.radius * blob.radius - squared).sqrt()
-                    } else {
-                        blob.radius - squared.sqrt()
-                    }
-                })
-                .fold(f32::NEG_INFINITY, f32::max);
-            let noise = (point.x * 0.11 + point.y * 0.07).sin()
-                * (point.y * 0.13 - point.x * 0.05).sin()
-                + 0.5 * (point.x * 0.31 - point.y * 0.27).sin();
-            height + noise * radius * 0.09
-        };
-        let light = Vec3::new(-0.55, 0.62, 0.56).normalize();
-        let trunk_width = radius * 0.11 + 4.0;
-        let mut cells = Vec::new();
+        let cells = organic_cells(spot.radius, spot.height, rock, rng);
         let mut min = Vec2::splat(f32::INFINITY);
         let mut max = Vec2::splat(f32::NEG_INFINITY);
-        for iy in 0..=((spot.height + radius * 0.2) / 8.0) as usize {
-            let y = iy as f32 * 8.0;
-            for ix in 0..=(radius * 3.8 / 5.0) as usize {
-                let x = -radius * 1.9 + ix as f32 * 5.0;
-                let local = Vec2::new(x, y);
-                let canopy = surface(local) > 0.0;
-                let half_trunk = if rock || y > cy {
-                    0.0
-                } else {
-                    trunk_width * (1.0 + 1.1 * (-y / 10.0).exp()) * (1.0 - 0.3 * y / cy.max(1.0))
-                };
-                let branch_y = cy * 0.55;
-                let branch_k = (y - branch_y) / (cy - branch_y + 1.0);
-                let branch = !rock
-                    && y >= branch_y
-                    && y <= cy + radius * 0.2
-                    && [-1.0, 1.0].iter().any(|sign| {
-                        (x - sign * branch_k * radius * 0.45).abs()
-                            < trunk_width * 0.6 * (1.0 - branch_k * 0.4)
-                    });
-                if !canopy && x.abs() >= half_trunk && !branch {
-                    continue;
-                }
-                let brightness = if canopy {
-                    let nx = -(surface(local + Vec2::new(2.0, 0.0))
-                        - surface(local - Vec2::new(2.0, 0.0)))
-                        / 4.0;
-                    let ny = -(surface(local + Vec2::new(0.0, 2.0))
-                        - surface(local - Vec2::new(0.0, 2.0)))
-                        / 4.0;
-                    let ao = if rock {
-                        1.0
-                    } else {
-                        0.55 + 0.45 * ((y - (cy - radius)) / (radius * 1.4)).clamp(0.0, 1.0)
-                    };
-                    Vec3::new(nx, ny, 1.0)
-                        .normalize()
-                        .dot(light)
-                        .max(0.0)
-                        .powf(1.6)
-                        * ao
-                } else {
-                    let nx = (x / half_trunk.max(1.0)).clamp(-1.0, 1.0);
-                    (0.25 + 0.45 * (-nx * 0.8 + 0.3).max(0.0))
-                        * if y > cy * 0.7 { 0.6 } else { 1.0 }
-                };
-                cells.push(TreeCell {
-                    local,
-                    brightness: brightness.clamp(0.0, 0.999),
-                    seed: rng.next(),
-                    canopy,
-                });
-                min = min.min(local);
-                max = max.max(local);
-            }
+        for cell in &cells {
+            min = min.min(cell.local);
+            max = max.max(cell.local);
         }
         let margin = Vec2::new(if rock { 3.0 } else { 36.0 }, 5.0);
         let bounds = Bounds {
@@ -831,24 +721,6 @@ fn hash_noise(x: i32, y: i32) -> f32 {
     hash = hash.wrapping_mul(0x7feb352d);
     hash ^= hash >> 15;
     (hash >> 8) as f32 / 16_777_215.0 * 2.0 - 1.0
-}
-
-/// Mulberry32, matching the reference's wrapping integer arithmetic. Take 24
-/// bits for f32 so rounding can never produce 1.0 and overrun palette indices.
-struct Random(u32);
-impl Random {
-    fn new(seed: u32) -> Self {
-        Self(seed)
-    }
-    fn next(&mut self) -> f32 {
-        self.0 = self.0.wrapping_add(0x6d2b79f5);
-        let mut t = (self.0 ^ (self.0 >> 15)).wrapping_mul(1 | self.0);
-        t = t.wrapping_add((t ^ (t >> 7)).wrapping_mul(61 | t)) ^ t;
-        ((t ^ (t >> 14)) >> 8) as f32 / 16_777_216.0
-    }
-    fn signed(&mut self) -> f32 {
-        self.next() * 2.0 - 1.0
-    }
 }
 
 #[cfg(test)]

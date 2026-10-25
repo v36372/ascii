@@ -2,7 +2,7 @@
 //! Live low-poly knight geometry. All vertices are posed in 3D each frame, before
 //! the GPU depth-tests and lights them in the small orthographic render target.
 
-use super::super::{depth, GlyphInstance, HeroPose};
+use super::super::{depth, GlyphInstance, KnightPose};
 use glam::{Mat4, Vec3};
 use std::f32::consts::{FRAC_PI_2, PI, TAU};
 
@@ -39,7 +39,7 @@ pub(super) fn camera() -> Mat4 {
     )
 }
 
-pub(super) fn cells(pose: HeroPose) -> impl Iterator<Item = GlyphInstance> {
+pub(super) fn cells(pose: KnightPose) -> impl Iterator<Item = GlyphInstance> {
     let feet_y = (camera().project_point3(Vec3::ZERO).y + 1.0) * 0.5;
     (0..COLS * ROWS).map(move |index| {
         let x = (index % COLS) as f32 + 0.5;
@@ -188,7 +188,7 @@ fn at(x: f32, y: f32, z: f32) -> Mat4 {
     Mat4::from_translation(Vec3::new(x, y, z))
 }
 
-pub(super) fn mesh(pose: HeroPose) -> Vec<Vertex> {
+pub(super) fn mesh(pose: KnightPose) -> Vec<Vertex> {
     let steel = material(0xc4ccd8);
     let dark = material(0x3a3f4c);
     let leather = material(0x6b4528);
@@ -262,7 +262,7 @@ mod tests {
 
     #[test]
     fn knight_is_finite_flat_shaded_triangle_geometry() {
-        let vertices = mesh(HeroPose::default());
+        let vertices = mesh(KnightPose::default());
         assert!(vertices.len() > 1000);
         assert_eq!(vertices.len() % 3, 0);
         for tri in vertices.as_chunks::<3>().0 {
@@ -283,28 +283,28 @@ mod tests {
 
     #[test]
     fn pose_changes_geometry_but_world_translation_does_not() {
-        let base = mesh(HeroPose::default());
-        assert_eq!(base, mesh(HeroPose::default()));
+        let base = mesh(KnightPose::default());
+        assert_eq!(base, mesh(KnightPose::default()));
         assert_eq!(
             base,
-            mesh(HeroPose {
+            mesh(KnightPose {
                 position: [100.0, -200.0],
-                ..HeroPose::default()
+                ..KnightPose::default()
             })
         );
         for pose in [
-            HeroPose {
+            KnightPose {
                 yaw: FRAC_PI_2,
-                ..HeroPose::default()
+                ..KnightPose::default()
             },
-            HeroPose {
+            KnightPose {
                 phase: FRAC_PI_2,
                 movement: 1.0,
-                ..HeroPose::default()
+                ..KnightPose::default()
             },
-            HeroPose {
+            KnightPose {
                 time: 1.0,
-                ..HeroPose::default()
+                ..KnightPose::default()
             },
         ] {
             assert_ne!(base, mesh(pose));
@@ -313,9 +313,9 @@ mod tests {
 
     #[test]
     fn cells_have_correct_grid_foot_anchor_and_ground_depth() {
-        let pose = HeroPose {
+        let pose = KnightPose {
             position: [13.0, -70.0],
-            ..HeroPose::default()
+            ..KnightPose::default()
         };
         let cells: Vec<_> = cells(pose).collect();
         assert_eq!(cells.len(), 812);

@@ -48,3 +48,11 @@ pub mod ui;
 
 #[cfg(feature = "meadow")]
 pub mod meadow;
+
+/// Native GPU engine and scene authoring (enabled by the `spatial` feature).
+#[cfg(feature = "spatial")]
+pub mod spatial;
+
+/// Playable cyberpunk city built on the native spatial renderer.
+#[cfg(feature = "spatial")]
+pub mod cyberpunk;

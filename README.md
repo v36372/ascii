@@ -13,6 +13,35 @@ the remaining content/tooling gaps.
 
 *Native Metal capture, seed 2024, initial frame, 1280×800.*
 
+## Explore Neon Ward
+
+A playable cyberpunk street built with the existing **native spatial glyph
+renderer**: parallax skylines, neon storefronts, wet-asphalt reflections, rain,
+rooftop drones, a passing maglev, and walking pedestrians. The articulated
+glyph-art runner has a neon visor and scarf; no external art assets are needed.
+
+```sh
+cargo run --release --features spatial --bin cyberpunk
+```
+
+![Neon Ward GPU capture](docs/cyberpunk.png)
+
+**WASD / arrows** move in both street directions and into alleys, **Shift**
+sprints, **wheel / +/-** zoom, **Space** pauses, **R** resets, **F1** toggles
+auto-walking, and **Esc** exits. Storefronts and lamp posts block movement;
+the camera follows the runner. This is an exploration scene, not a combat game.
+
+Reproducible capture (requires a GPU, not a display):
+
+```sh
+cargo run --release --features spatial --bin cyberpunk -- \
+  --headless --frames 120 --size 1280x800 --output /tmp/cyberpunk.png
+```
+
+Use `--auto` for automatic movement, `--seed N` for seeded surface/rain details,
+or `--frames 0` for the initial scene. `--help` lists all options. The scene and
+collision tests run without a GPU: `cargo test --features spatial cyberpunk`.
+
 ## Play the meadow
 
 Install current stable Rust, then from the repository root:
@@ -71,8 +100,9 @@ N presented frames, useful for native-window smoke testing.
 
 ## Native engine modules
 
-The default build is terminal-only; `meadow` adds the spatial GPU renderer and
-`audio` adds native playback.
+The default build is terminal-only; `spatial` adds the native GPU engine and
+shared application runner. `meadow` enables `spatial` plus the meadow demo,
+preserving existing commands. `audio` adds native playback.
 
 - `graphics`: colors, clip stack, Z canvas, shapes, image drawing and capture.
 - `image`: transforms plus TXT, REXPaint CSV and gzipped XP I/O.
@@ -87,8 +117,12 @@ The default build is terminal-only; `meadow` adds the spatial GPU renderer and
   timers, typed messages, logging and render statistics.
 - `audio`: WAV/AIFF/AU decoding, playback controls, beat envelopes and a registry.
 - `layout`, `random`, `curve`: UI relations, reproducible randomness, easing and gradients.
-- `meadow`: renderer-neutral glyph frames, deterministic world simulation and the
-  GPU instancing/3D-character/PNG pipeline.
+- `spatial`: GPU renderer/atlas/shaders, checked primitives, transformable glyph
+  groups, depth/bounds, reusable props, and lazy optional-character rendering.
+- `spatial::app`: common window/input/resize/presentation loop and deterministic
+  headless capture through the `Application` trait.
+- `meadow` / `cyberpunk`: independent scene simulations and content. The engine
+  does not import either demo; legacy meadow renderer/type paths are re-exported.
 
 Run the integrated terminal showcase with:
 
@@ -101,6 +135,30 @@ The spatial renderer deliberately does **not** route through the terminal
 rotated, subpixel glyph sprites. Both paths share assets and runtime concepts but
 have separate frame representations. This is not a claim of an exact Three.js
 shader port or pixel-identical reproduction of the reference.
+
+## Composable native scenes
+
+Use **`cosplay::spatial`** (feature `spatial`) to build independent GPU scenes:
+checked glyphs/colors, solid backings, reusable local-space glyph groups,
+transforms, bounds, explicit depth anchors, and configurable grass/tree/rock
+prefabs. `SceneFrame` has a configurable camera/background and **no implicit
+knight**; the existing live character is optional. The original meadow API is
+preserved.
+
+See **[the authoring guide](docs/spatial.md)** for coordinate/depth contracts,
+validation guarantees, transparency limitations, and recipes. The standalone
+courtyard example uses only public APIs—no edits to the renderer or meadow world:
+
+```sh
+cargo run --features spatial --example spatial_courtyard -- /tmp/courtyard.png 2
+```
+
+The arguments are output PNG path and animation time in seconds. Capture needs a
+working GPU even without a window. Run its public-API GPU contract test with:
+
+```sh
+cargo test --features spatial --test spatial_gpu --locked -- --ignored --nocapture
+```
 
 ## Terminal game foundation
 
@@ -128,11 +186,14 @@ intentionally replaces Scala's unrestricted mutable object references.
 ```sh
 cargo fmt --check
 cargo test --all-features --all-targets --locked
+# Ensure engine/cyberpunk do not depend on the meadow module.
+cargo test --no-default-features --features spatial --all-targets --locked
 cargo test --all-features --doc --locked
 cargo clippy --all-features --all-targets --locked -- -D warnings
 cargo run --example terminal_showcase
 # Requires a usable graphics adapter; validates real rendered PNGs and live 3D poses.
-cargo test --features meadow --lib meadow::renderer --locked -- --ignored --nocapture
+cargo test --features spatial --lib spatial::renderer --locked -- --ignored --nocapture
+cargo test --features spatial --test cyberpunk_cli --locked -- --ignored --nocapture
 cargo test --features meadow --test meadow_cli --locked -- --ignored --nocapture
 # Unix/macOS: startup/input/resize/normal/error/panic terminal lifecycle.
 cargo build --bin pong --example terminal_lifecycle --locked

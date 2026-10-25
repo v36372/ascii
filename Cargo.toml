@@ -8,7 +8,9 @@ publish = false
 
 [features]
 default = []
-meadow = ["dep:wgpu", "dep:winit", "dep:glam", "dep:fontdue", "dep:bytemuck", "dep:pollster", "dep:png"]
+spatial = ["dep:wgpu", "dep:winit", "dep:glam", "dep:fontdue", "dep:bytemuck", "dep:pollster", "dep:png"]
+# Compatibility feature: enables the spatial engine and the meadow demo.
+meadow = ["spatial"]
 audio = ["dep:rodio"]
 
 [dependencies]
@@ -32,3 +34,12 @@ path = "src/bin/pong.rs"
 name = "meadow"
 path = "src/bin/meadow.rs"
 required-features = ["meadow"]
+
+[[example]]
+name = "spatial_courtyard"
+required-features = ["spatial"]
+
+[[bin]]
+name = "cyberpunk"
+path = "src/bin/cyberpunk.rs"
+required-features = ["spatial"]

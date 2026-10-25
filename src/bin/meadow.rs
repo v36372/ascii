@@ -2,24 +2,16 @@
 //! Native 2D glyph meadow with a live animated 3D knight.
 #![forbid(unsafe_code)]
 
-use cosplay::meadow::{renderer::GpuRenderer, world::World, Controls, GlyphInstance, MeadowFrame};
-use std::{
-    collections::HashSet,
-    path::PathBuf,
-    sync::Arc,
-    time::{Duration, Instant},
+use cosplay::{
+    meadow::{world::World, GlyphInstance, MeadowFrame},
+    spatial::{
+        app::{self, AppOptions, Application, View},
+        Controls,
+    },
 };
-use winit::{
-    application::ApplicationHandler,
-    dpi::PhysicalSize,
-    event::{ElementState, MouseScrollDelta, WindowEvent},
-    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    keyboard::{KeyCode, PhysicalKey},
-    window::{Window, WindowId},
-};
+use std::path::PathBuf;
 
 const HELP: &str = "CosPlay Meadow - native 2D glyph world, live 3D character\n\nUsage: meadow [options]\n\nWASD / arrows move | Shift run | +/- or wheel zoom\nSpace pause | R reset | F1 toggle auto-walk | Esc quit\n\n--headless       Capture a GPU-rendered PNG without opening a window\n--frames N       Headless simulation steps (default 120); window frame limit if supplied\n--output PATH    Headless PNG destination (default meadow.png)\n--size WxH       Pixels (default 1280x800; 64..4096 by 64..2160)\n--seed N         Deterministic world seed (default 2024)\n--density X      Grass/flower density (0.25..2; default 1)\n--zoom X         Zoom (0.5..3; default 1)\n--auto           Start in auto-walk mode\n--licenses       Print embedded font license\n--help           Show this help\n\nHeadless capture still requires a supported GPU/graphics adapter.\n";
-const FRAME: Duration = Duration::from_nanos(1_000_000_000 / 60);
 
 #[derive(Clone, Debug, PartialEq)]
 struct Options {
@@ -134,65 +126,6 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Invocation, String> {
     Ok(Invocation::Run(opts))
 }
 
-#[derive(Default)]
-struct InputState {
-    held: HashSet<KeyCode>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum Action {
-    Quit,
-    Pause,
-    Reset,
-    Auto,
-    Zoom(f32),
-}
-
-impl InputState {
-    /// Repeats and synthetic focus synchronization update held state, but must
-    /// never fire one-shot actions such as reset, pause, or quit.
-    fn event(
-        &mut self,
-        code: KeyCode,
-        state: ElementState,
-        suppress_actions: bool,
-    ) -> Option<Action> {
-        if state == ElementState::Released {
-            self.held.remove(&code);
-            return None;
-        }
-        let first = self.held.insert(code);
-        if suppress_actions || !first {
-            return None;
-        }
-        match code {
-            KeyCode::Escape => Some(Action::Quit),
-            KeyCode::Space => Some(Action::Pause),
-            KeyCode::KeyR => Some(Action::Reset),
-            KeyCode::F1 => Some(Action::Auto),
-            KeyCode::Equal | KeyCode::NumpadAdd => Some(Action::Zoom(1.15)),
-            KeyCode::Minus | KeyCode::NumpadSubtract => Some(Action::Zoom(1.0 / 1.15)),
-            _ => None,
-        }
-    }
-
-    fn clear(&mut self) {
-        self.held.clear();
-    }
-
-    fn controls(&self, autoplay: bool) -> Controls {
-        let held = |a, b| self.held.contains(&a) || self.held.contains(&b);
-        Controls {
-            up: held(KeyCode::KeyW, KeyCode::ArrowUp),
-            down: held(KeyCode::KeyS, KeyCode::ArrowDown),
-            left: held(KeyCode::KeyA, KeyCode::ArrowLeft),
-            right: held(KeyCode::KeyD, KeyCode::ArrowRight),
-            run: held(KeyCode::ShiftLeft, KeyCode::ShiftRight),
-            autoplay,
-        }
-    }
-}
-
 /// Screen-space HUD expressed through the same independent glyph renderer.
 fn hud(frame: &mut MeadowFrame, width: u32, height: u32, paused: bool, autoplay: bool) {
     let unit = frame.view_height / height as f32;
@@ -243,325 +176,57 @@ fn hud(frame: &mut MeadowFrame, width: u32, height: u32, paused: bool, autoplay:
     }
 }
 
-fn headless(opts: Options) -> Result<(), String> {
-    let mut world = World::new(opts.seed, opts.density);
-    let steps = opts.frames.unwrap_or(120);
-    for _ in 0..steps {
-        world.step(
-            1.0 / 30.0,
-            Controls {
-                autoplay: opts.autoplay,
-                ..Default::default()
-            },
-        );
-    }
-    let (width, height) = opts.size;
-    let mut frame = world.frame(width as f32 / height as f32, opts.zoom);
-    hud(&mut frame, width, height, false, opts.autoplay);
-    let instance = wgpu::Instance::default();
-    let mut renderer = pollster::block_on(GpuRenderer::new(&instance, None))?;
-    let info = renderer.adapter.get_info();
-    renderer.capture_png(width, height, &frame, &opts.output)?;
-    println!(
-        "meadow: adapter={} backend={:?} frames={steps} seed={} glyphs={} player={:?} output={}",
-        info.name,
-        info.backend,
-        opts.seed,
-        frame.instances.len(),
-        world.player_position(),
-        opts.output.display()
-    );
-    Ok(())
+struct MeadowApp {
+    world: World,
+    seed: u32,
+    density: f32,
 }
-
-struct WindowState {
-    renderer: GpuRenderer,
-    surface: wgpu::Surface<'static>,
-    config: wgpu::SurfaceConfiguration,
-    window: Arc<Window>,
-    size: PhysicalSize<u32>,
-    _instance: wgpu::Instance,
-}
-
-impl WindowState {
-    fn new(event_loop: &ActiveEventLoop, opts: &Options) -> Result<Self, String> {
-        let window = Arc::new(
-            event_loop
-                .create_window(
-                    Window::default_attributes()
-                        .with_title("CosPlay Meadow - 2D world / live 3D glyph knight")
-                        .with_inner_size(PhysicalSize::new(opts.size.0, opts.size.1)),
-                )
-                .map_err(|e| format!("create window: {e}"))?,
-        );
-        let instance = wgpu::Instance::default();
-        let surface = instance
-            .create_surface(window.clone())
-            .map_err(|e| format!("create GPU surface: {e}"))?;
-        let renderer = pollster::block_on(GpuRenderer::new(&instance, Some(&surface)))?;
-        let size = window.inner_size();
-        let mut config = surface
-            .get_default_config(&renderer.adapter, size.width.max(1), size.height.max(1))
-            .ok_or("no supported surface configuration")?;
-        config.format = renderer.format;
-        config.present_mode = wgpu::PresentMode::Fifo;
-        surface.configure(&renderer.device, &config);
-        let info = renderer.adapter.get_info();
-        println!("meadow: {} ({:?}) - WASD/arrows move, Shift run, wheel zoom, Space pause, F1 auto-walk, Esc quit",info.name,info.backend);
-        Ok(Self {
-            renderer,
-            surface,
-            config,
-            window,
-            size,
-            _instance: instance,
-        })
+impl Application for MeadowApp {
+    type Frame = MeadowFrame;
+    fn update(&mut self, dt: f32, controls: Controls) {
+        self.world.step(dt, controls);
     }
-
-    fn resize(&mut self, size: PhysicalSize<u32>) -> Result<(), String> {
-        self.size = size;
-        if size.width == 0 || size.height == 0 {
-            return Ok(());
-        }
-        let max = self.renderer.device.limits().max_texture_dimension_2d;
-        if size.width > max || size.height > max {
-            return Err(format!("window exceeds GPU texture dimension limit {max}"));
-        }
-        self.config.width = size.width;
-        self.config.height = size.height;
-        self.surface.configure(&self.renderer.device, &self.config);
+    fn reset(&mut self) -> Result<(), String> {
+        self.world = World::new(self.seed, self.density);
         Ok(())
     }
-
-    fn draw(&mut self, frame: &MeadowFrame) -> Result<bool, String> {
-        if self.size.width == 0 || self.size.height == 0 {
-            return Ok(false);
-        }
-        let output = match self.surface.get_current_texture() {
-            Ok(output) => output,
-            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                self.surface.configure(&self.renderer.device, &self.config);
-                return Ok(false);
-            }
-            Err(wgpu::SurfaceError::Timeout) => return Ok(false),
-            Err(error) => return Err(format!("acquire surface: {error}")),
-        };
-        let view = output.texture.create_view(&Default::default());
-        self.renderer
-            .render(&view, self.size.width, self.size.height, frame)?;
-        self.window.pre_present_notify();
-        output.present();
-        Ok(true)
-    }
-}
-
-struct App {
-    opts: Options,
-    world: World,
-    input: InputState,
-    state: Option<WindowState>,
-    paused: bool,
-    error: Option<String>,
-    last_tick: Instant,
-    next_redraw: Instant,
-    stats_at: Instant,
-    stats_frames: u32,
-    frames: u32,
-}
-
-impl App {
-    fn new(opts: Options) -> Self {
-        let now = Instant::now();
-        Self {
-            world: World::new(opts.seed, opts.density),
-            opts,
-            input: InputState::default(),
-            state: None,
-            paused: false,
-            error: None,
-            last_tick: now,
-            next_redraw: now,
-            stats_at: now,
-            stats_frames: 0,
-            frames: 0,
-        }
-    }
-    fn fail(&mut self, event_loop: &ActiveEventLoop, error: String) {
-        self.error = Some(error);
-        event_loop.exit();
-    }
-    fn action(&mut self, event_loop: &ActiveEventLoop, action: Action) {
-        match action {
-            Action::Quit => event_loop.exit(),
-            Action::Pause => self.paused = !self.paused,
-            Action::Auto => self.opts.autoplay = !self.opts.autoplay,
-            Action::Reset => {
-                self.world = World::new(self.opts.seed, self.opts.density);
-                self.paused = false;
-            }
-            Action::Zoom(factor) => self.opts.zoom = (self.opts.zoom * factor).clamp(0.5, 3.0),
-        }
-    }
-
-    fn redraw(&mut self, event_loop: &ActiveEventLoop) {
-        let now = Instant::now();
-        let dt = now.duration_since(self.last_tick).as_secs_f32();
-        self.last_tick = now;
-        self.next_redraw = now + FRAME;
-        let Some(state) = &mut self.state else {
-            return;
-        };
-        if state.size.width == 0 || state.size.height == 0 {
-            return;
-        }
-        if !self.paused {
-            self.world.step(dt, self.input.controls(self.opts.autoplay));
-        }
-        let mut frame = self.world.frame(
-            state.size.width as f32 / state.size.height as f32,
-            self.opts.zoom,
-        );
+    fn frame(&self, view: View) -> Result<Self::Frame, String> {
+        let mut frame = self.world.frame(view.aspect(), view.zoom);
         hud(
             &mut frame,
-            state.size.width,
-            state.size.height,
-            self.paused,
-            self.opts.autoplay,
+            view.width,
+            view.height,
+            view.paused,
+            view.autoplay,
         );
-        match state.draw(&frame) {
-            Ok(true) => {
-                self.frames += 1;
-                self.stats_frames += 1;
-            }
-            Ok(false) => (),
-            Err(error) => {
-                self.fail(event_loop, error);
-                return;
-            }
-        }
-        let elapsed = now.duration_since(self.stats_at).as_secs_f32();
-        if elapsed >= 0.5 {
-            state.window.set_title(&format!(
-                "CosPlay Meadow | {:.0} FPS | {} glyphs | 2D world + live 3D knight",
-                self.stats_frames as f32 / elapsed,
-                frame.instances.len()
-            ));
-            self.stats_frames = 0;
-            self.stats_at = now;
-        }
-        if self.opts.frames.is_some_and(|limit| self.frames >= limit) {
-            event_loop.exit();
-        }
-    }
-}
-
-impl ApplicationHandler for App {
-    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.state.is_none() {
-            match WindowState::new(event_loop, &self.opts) {
-                Ok(state) => {
-                    self.state = Some(state);
-                    self.last_tick = Instant::now();
-                    self.next_redraw = self.last_tick;
-                    self.stats_at = self.last_tick;
-                }
-                Err(error) => self.fail(event_loop, error),
-            }
-        }
-    }
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
-        if self.state.as_ref().is_none_or(|s| s.window.id() != id) {
-            return;
-        }
-        match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
-            WindowEvent::Resized(size) => {
-                if let Err(error) = self.state.as_mut().unwrap().resize(size) {
-                    self.fail(event_loop, error);
-                }
-                self.last_tick = Instant::now();
-                self.next_redraw = self.last_tick;
-            }
-            WindowEvent::Focused(false) => self.input.clear(),
-            WindowEvent::KeyboardInput {
-                event,
-                is_synthetic,
-                ..
-            } => {
-                if let PhysicalKey::Code(code) = event.physical_key {
-                    if let Some(action) =
-                        self.input
-                            .event(code, event.state, event.repeat || is_synthetic)
-                    {
-                        self.action(event_loop, action);
-                    }
-                }
-            }
-            WindowEvent::MouseWheel { delta, .. } => {
-                let amount = match delta {
-                    MouseScrollDelta::LineDelta(_, y) => y,
-                    MouseScrollDelta::PixelDelta(p) => (p.y / 60.0) as f32,
-                };
-                if amount.is_finite() {
-                    self.action(
-                        event_loop,
-                        Action::Zoom(1.1f32.powf(amount.clamp(-5.0, 5.0))),
-                    );
-                }
-            }
-            WindowEvent::RedrawRequested => self.redraw(event_loop),
-            _ => (),
-        }
-    }
-    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        let Some(state) = &self.state else {
-            event_loop.set_control_flow(ControlFlow::Wait);
-            return;
-        };
-        if state.size.width == 0 || state.size.height == 0 {
-            event_loop.set_control_flow(ControlFlow::Wait);
-            return;
-        }
-        let now = Instant::now();
-        if now >= self.next_redraw {
-            state.window.request_redraw();
-        }
-        event_loop.set_control_flow(redraw_flow(now, self.next_redraw));
-    }
-    fn suspended(&mut self, _: &ActiveEventLoop) {
-        self.input.clear();
-        self.state = None;
-    }
-    fn exiting(&mut self, _: &ActiveEventLoop) {
-        // run_app consumes and drops the event loop before the App itself.
-        // Destroy the window, surface, and GPU backends while Wayland/X11
-        // connections are still alive.
-        self.state = None;
-    }
-}
-
-fn redraw_flow(now: Instant, deadline: Instant) -> ControlFlow {
-    // A redraw is already requested when due. Wait for its delivery instead of
-    // repeatedly waking on an expired deadline while the compositor delays it.
-    if now >= deadline {
-        ControlFlow::Wait
-    } else {
-        ControlFlow::WaitUntil(deadline)
+        Ok(frame)
     }
 }
 
 fn run(opts: Options) -> Result<(), String> {
+    let mut game = MeadowApp {
+        world: World::new(opts.seed, opts.density),
+        seed: opts.seed,
+        density: opts.density,
+    };
+    let options = AppOptions {
+        title: "CosPlay Meadow - 2D world / live 3D glyph knight".into(),
+        size: opts.size,
+        frames: opts.frames,
+        zoom: opts.zoom,
+        autoplay: opts.autoplay,
+    };
     if opts.headless {
-        return headless(opts);
-    }
-    let event_loop = EventLoop::new().map_err(|e| format!("create event loop: {e}"))?;
-    let mut app = App::new(opts);
-    event_loop
-        .run_app(&mut app)
-        .map_err(|e| format!("event loop: {e}"))?;
-    match app.error {
-        Some(error) => Err(error),
-        None => Ok(()),
+        let steps = opts.frames.unwrap_or(120);
+        let report = app::capture(&mut game, &options, steps, &opts.output)?;
+        println!(
+            "meadow: adapter={} backend={:?} frames={steps} seed={} glyphs={} player={:?} output={}",
+            report.adapter.name, report.adapter.backend, opts.seed, report.glyphs,
+            game.world.player_position(), opts.output.display()
+        );
+        Ok(())
+    } else {
+        app::run(game, options)
     }
 }
 
@@ -615,61 +280,6 @@ mod tests {
         ] {
             assert!(opts(&args).is_err(), "{args:?}");
         }
-    }
-    #[test]
-    fn held_keys_release_independently_and_focus_loss_clears_them() {
-        let mut input = InputState::default();
-        input.event(KeyCode::KeyW, ElementState::Pressed, false);
-        input.event(KeyCode::ArrowUp, ElementState::Pressed, false);
-        input.event(KeyCode::ShiftLeft, ElementState::Pressed, false);
-        assert!(input.controls(false).up && input.controls(false).run);
-        input.event(KeyCode::KeyW, ElementState::Released, false);
-        assert!(input.controls(false).up);
-        input.clear();
-        assert!(!input.controls(false).up);
-        assert!(!input.controls(false).run);
-    }
-    #[test]
-    fn repeated_keydown_does_not_repeat_toggles() {
-        let mut input = InputState::default();
-        assert_eq!(
-            input.event(KeyCode::Space, ElementState::Pressed, false),
-            Some(Action::Pause)
-        );
-        assert_eq!(
-            input.event(KeyCode::Space, ElementState::Pressed, true),
-            None
-        );
-        assert_eq!(
-            input.event(KeyCode::Space, ElementState::Pressed, false),
-            None
-        );
-        input.event(KeyCode::Space, ElementState::Released, false);
-        assert_eq!(
-            input.event(KeyCode::Space, ElementState::Pressed, false),
-            Some(Action::Pause)
-        );
-    }
-    #[test]
-    fn synthetic_focus_keys_update_movement_without_firing_actions() {
-        let mut input = InputState::default();
-        for key in [KeyCode::Escape, KeyCode::Space, KeyCode::KeyR, KeyCode::F1] {
-            assert_eq!(input.event(key, ElementState::Pressed, true), None);
-        }
-        input.event(KeyCode::KeyW, ElementState::Pressed, true);
-        assert!(input.controls(false).up);
-        input.event(KeyCode::KeyW, ElementState::Released, true);
-        assert!(!input.controls(false).up);
-    }
-    #[test]
-    fn delayed_redraw_waits_instead_of_spinning_on_an_expired_deadline() {
-        let now = Instant::now();
-        assert_eq!(redraw_flow(now, now), ControlFlow::Wait);
-        assert_eq!(redraw_flow(now + FRAME, now), ControlFlow::Wait);
-        assert_eq!(
-            redraw_flow(now, now + FRAME),
-            ControlFlow::WaitUntil(now + FRAME)
-        );
     }
     #[test]
     fn hud_is_frontmost_and_uses_screen_space() {
